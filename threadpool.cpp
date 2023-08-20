@@ -4,36 +4,64 @@
 #include <queue>
 #include <mutex>
 #include <condition_variable>
+#include <vector>
 
 using namespace std;
 
 
-class ZeefanExecutorV2
+class ThreadFactory
 {
 public:
-   ZeefanExecutorV2()
+
+    thread createThread(const std::function<void()>& func)
+    {
+        return thread(func);
+    }
+private:
+
+    static int generateId_;
+    int threadId_;
+};
+
+
+class Thread
+{
+public:
+   Thread(ThreadFactory* factory = new ThreadFactory()) : factory_(factory){}
+
+   ~ Thread()
    {
-    consumerThread = thread(&ZeefanExecutorV2::consumer, this); // 运行 worker 线程函数
-   } 
-   ~ ZeefanExecutorV2()
-   {
-        isPoolRunning_ = true;
+        isPoolRunning_ = false;
         condition.notify_one();
-        consumerThread.join();
+        for(auto& t : threadContainer_)
+        {
+            t.join();
+        }
+        delete factory_;
+
    }
 
    void producer(function<void()>func)
    {
-    std::unique_lock<std::mutex>lock (queueMutex);
-    //任务队列满了
-    if(workQueue.size() > maxQueueSize)
-    {
-        cout<< "task queue is full" <<endl;
-        return;
-    }
-    workQueue.push(func);
-    std::cout << "producer add task"<<std::endl;
-    condition.notify_one();
+        std::unique_lock<std::mutex>lock (queueMutex);
+
+
+        if(threadContainer_.size() < coreThreadSize_)
+        {
+            threadContainer_.push_back(factory_->createThread(std::bind(&Thread::consumer, this)));
+            std::cout << "thread create"<<std::endl;
+        }
+
+
+        //任务队列满了
+        if(taskQueue.size() > maxQueueSize)
+        {
+            cout<< "task queue is full" <<endl;
+            return;
+        }
+        taskQueue.push(func);
+        std::cout << "producer add task"<<std::endl;
+        condition.notify_one();
 
    }
     
@@ -45,12 +73,12 @@ private:
         std::function<void()> task;
         {
             std::unique_lock<std::mutex> lock(queueMutex);
-            condition.wait(lock, [this]{return !workQueue.empty() || isPoolRunning_ == false;});
-            if(isPoolRunning_ && workQueue.empty())
+            condition.wait(lock, [this]{return !taskQueue.empty() || isPoolRunning_ == false;});
+            if(isPoolRunning_ && taskQueue.empty())
                 break;
             
-            task = workQueue.front();
-            workQueue.pop();
+            task = taskQueue.front();
+            taskQueue.pop();
         }
         if(task){
             std::cout<<"consumer consume task" << endl;
@@ -63,12 +91,16 @@ private:
     }
     
 private:
-    queue<function<void()>> workQueue;
+    queue<function<void()>> taskQueue;
     thread consumerThread;
     mutex queueMutex;
     condition_variable condition;
     const size_t maxQueueSize = 3;
     bool isPoolRunning_ = true;
+    int coreThreadSize_ = std::thread::hardware_concurrency();
+    vector<std::thread> threadContainer_;
+    ThreadFactory* factory_;
+    int consumeCount_ = 0;
 
 };
 
@@ -85,19 +117,16 @@ void myTask()
 
 int main()
 {
-    ZeefanExecutorV2 obj;
+    Thread obj;
 
-    obj.producer(myTask);
-    obj.producer(myTask);
-    obj.producer(myTask);
-    obj.producer(myTask);
-    obj.producer(myTask);
-    obj.producer(myTask);
-    obj.producer(myTask);
-    obj.producer(myTask);
+    for(int i = 0; i < 20; i++)
+    {
+        obj.producer(myTask);
+    }
 
 
-    std::this_thread::sleep_for(std::chrono::seconds(1));
+
+    std::this_thread::sleep_for(std::chrono::seconds(3));
 
     return 0;
 }
