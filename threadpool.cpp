@@ -13,13 +13,13 @@ class ZeefanExecutorV2
 public:
    ZeefanExecutorV2()
    {
-    workerThread = thread(&ZeefanExecutorV2::consumer, this); // 运行 worker 线程函数
+    consumerThread = thread(&ZeefanExecutorV2::consumer, this); // 运行 worker 线程函数
    } 
    ~ ZeefanExecutorV2()
    {
-        terminate = true;
+        isPoolRunning_ = true;
         condition.notify_one();
-        workerThread.join();
+        consumerThread.join();
    }
 
    void producer(function<void()>func)
@@ -45,8 +45,8 @@ private:
         std::function<void()> task;
         {
             std::unique_lock<std::mutex> lock(queueMutex);
-            condition.wait(lock, [this]{return !workQueue.empty() || terminate == true;});
-            if(terminate && workQueue.empty())
+            condition.wait(lock, [this]{return !workQueue.empty() || isPoolRunning_ == false;});
+            if(isPoolRunning_ && workQueue.empty())
                 break;
             
             task = workQueue.front();
@@ -64,13 +64,11 @@ private:
     
 private:
     queue<function<void()>> workQueue;
-    thread workerThread;
+    thread consumerThread;
     mutex queueMutex;
     condition_variable condition;
     const size_t maxQueueSize = 3;
-    bool terminate = false;
-
-    
+    bool isPoolRunning_ = true;
 
 };
 
@@ -78,9 +76,9 @@ private:
 
 
 
-void myFuntion()
+void myTask()
 {
-    std::cout<<"thread running from function " << std::endl;
+    std::cout<<"task running" << std::endl;
     std::cout<< std::endl;
 }
 
@@ -89,14 +87,14 @@ int main()
 {
     ZeefanExecutorV2 obj;
 
-    obj.producer(myFuntion);
-    obj.producer(myFuntion);
-    obj.producer(myFuntion);
-    obj.producer(myFuntion);
-    obj.producer(myFuntion);
-    obj.producer(myFuntion);
-    obj.producer(myFuntion);
-    obj.producer(myFuntion);
+    obj.producer(myTask);
+    obj.producer(myTask);
+    obj.producer(myTask);
+    obj.producer(myTask);
+    obj.producer(myTask);
+    obj.producer(myTask);
+    obj.producer(myTask);
+    obj.producer(myTask);
 
 
     std::this_thread::sleep_for(std::chrono::seconds(1));
