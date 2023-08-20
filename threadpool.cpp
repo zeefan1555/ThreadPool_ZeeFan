@@ -9,16 +9,26 @@
 using namespace std;
 
 
+class ThreadFactory
+{
+public:
+
+    thread createThread(const std::function<void()>& func)
+    {
+        return thread(func);
+    }
+private:
+
+    static int generateId_;
+    int threadId_;
+};
+
+
 class Thread
 {
 public:
-   Thread()
-   {
-       for(size_t i = 0 ; i < coreThreadSize_; i++)
-       {
-           threadContainer_.push_back(thread(&Thread::consumer, this));
-       }
-   }
+   Thread(ThreadFactory* factory = new ThreadFactory()) : factory_(factory){}
+
    ~ Thread()
    {
         isPoolRunning_ = false;
@@ -27,21 +37,29 @@ public:
         {
             t.join();
         }
+        delete factory_;
 
    }
 
    void producer(function<void()>func)
    {
-    std::unique_lock<std::mutex>lock (queueMutex);
-    //任务队列满了
-    if(workQueue.size() > maxQueueSize)
-    {
-        cout<< "task queue is full" <<endl;
-        return;
-    }
-    workQueue.push(func);
-    std::cout << "producer add task"<<std::endl;
-    condition.notify_one();
+        std::unique_lock<std::mutex>lock (queueMutex);
+
+        //创建核心线程
+        for(int i = 0;  i < coreThreadSize_; i++)
+        {
+            threadContainer_.push_back(factory_->createThread(std::bind(&Thread::consumer, this)));
+        }
+
+        //任务队列满了
+        if(taskQueue.size() > maxQueueSize)
+        {
+            cout<< "task queue is full" <<endl;
+            return;
+        }
+        taskQueue.push(func);
+        std::cout << "producer add task"<<std::endl;
+        condition.notify_one();
 
    }
     
@@ -53,12 +71,12 @@ private:
         std::function<void()> task;
         {
             std::unique_lock<std::mutex> lock(queueMutex);
-            condition.wait(lock, [this]{return !workQueue.empty() || isPoolRunning_ == false;});
-            if(isPoolRunning_ && workQueue.empty())
+            condition.wait(lock, [this]{return !taskQueue.empty() || isPoolRunning_ == false;});
+            if(isPoolRunning_ && taskQueue.empty())
                 break;
             
-            task = workQueue.front();
-            workQueue.pop();
+            task = taskQueue.front();
+            taskQueue.pop();
         }
         if(task){
             std::cout<<"consumer consume task" << endl;
@@ -71,7 +89,7 @@ private:
     }
     
 private:
-    queue<function<void()>> workQueue;
+    queue<function<void()>> taskQueue;
     thread consumerThread;
     mutex queueMutex;
     condition_variable condition;
@@ -79,6 +97,7 @@ private:
     bool isPoolRunning_ = true;
     int coreThreadSize_ = std::thread::hardware_concurrency();
     vector<std::thread> threadContainer_;
+    ThreadFactory* factory_;
 };
 
 
@@ -96,7 +115,7 @@ int main()
 {
     Thread obj;
 
-    for(int i = 0; i < 8; i++)
+    for(int i = 0; i < 20; i++)
     {
         obj.producer(myTask);
     }
