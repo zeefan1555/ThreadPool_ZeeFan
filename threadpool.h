@@ -38,6 +38,11 @@ public:
         t.detach();
     }
 
+    // 获取线程id
+    int getId()const
+    {
+        return threadId_;
+    }
 
 private:
     ThreadFunc func_;
@@ -69,7 +74,7 @@ public:
 
 //    ~ ThreadPool() {
 //        isPoolRunning_ = false;
-//        condition.notify_one();
+//        notEmpty_.notify_one();
 //        for (auto &t: threadContainer_) {
 //            t.join();
 //        }
@@ -94,8 +99,7 @@ public:
         }
         taskQue_.push(func);
         std::cout << "producer add task" << std::endl;
-        condition.notify_one();
-
+        notEmpty_.notify_all();
     }
 
 private:
@@ -104,7 +108,7 @@ private:
             std::function<void()> task;
             {
                 std::unique_lock<std::mutex> lock(taskQueMutex);
-                condition.wait(lock, [this] { return !taskQue_.empty() || isPoolRunning_ == false; });
+                notEmpty_.wait(lock, [this] { return !taskQue_.empty() || isPoolRunning_ == false; });
                 if (isPoolRunning_ && taskQue_.empty())
                     break;
 
@@ -137,6 +141,7 @@ private:
 
 
 private:
+    unordered_map<int, unique_ptr<Thread>> threadsContainer_;
     vector<std::thread> threadContainer_;
 
     int coreThreadSize_;
@@ -156,7 +161,9 @@ private:
     int consumeCount_ = 0;
 
     mutex taskQueMutex;
-    condition_variable condition;
+    condition_variable notEmpty_;
+
+
 
     PoolMode poolMode_;
     std::atomic_bool isPoolRunning_;
