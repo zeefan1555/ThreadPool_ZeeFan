@@ -45,11 +45,13 @@ public:
    {
         std::unique_lock<std::mutex>lock (queueMutex);
 
-        //创建核心线程
-        for(int i = 0;  i < coreThreadSize_; i++)
+
+        if(threadContainer_.size() < coreThreadSize_)
         {
             threadContainer_.push_back(factory_->createThread(std::bind(&Thread::consumer, this)));
+            std::cout << "thread create"<<std::endl;
         }
+
 
         //任务队列满了
         if(taskQueue.size() > maxQueueSize)
@@ -98,6 +100,8 @@ private:
     int coreThreadSize_ = std::thread::hardware_concurrency();
     vector<std::thread> threadContainer_;
     ThreadFactory* factory_;
+    int consumeCount_ = 0;
+
 };
 
 
@@ -122,7 +126,7 @@ int main()
 
 
 
-    std::this_thread::sleep_for(std::chrono::seconds(1));
+    std::this_thread::sleep_for(std::chrono::seconds(3));
 
     return 0;
 }
