@@ -4,22 +4,30 @@
 #include <queue>
 #include <mutex>
 #include <condition_variable>
+#include <vector>
 
 using namespace std;
 
 
-class ZeefanExecutorV2
+class Thread
 {
 public:
-   ZeefanExecutorV2()
+   Thread()
    {
-    consumerThread = thread(&ZeefanExecutorV2::consumer, this); // 运行 worker 线程函数
-   } 
-   ~ ZeefanExecutorV2()
+       for(size_t i = 0 ; i < coreThreadSize_; i++)
+       {
+           threadContainer_.push_back(thread(&Thread::consumer, this));
+       }
+   }
+   ~ Thread()
    {
         isPoolRunning_ = false;
         condition.notify_one();
-        consumerThread.join();
+        for(auto& t : threadContainer_)
+        {
+            t.join();
+        }
+
    }
 
    void producer(function<void()>func)
@@ -69,7 +77,8 @@ private:
     condition_variable condition;
     const size_t maxQueueSize = 3;
     bool isPoolRunning_ = true;
-
+    int coreThreadSize_ = std::thread::hardware_concurrency();
+    vector<std::thread> threadContainer_;
 };
 
 
@@ -85,7 +94,7 @@ void myTask()
 
 int main()
 {
-    ZeefanExecutorV2 obj;
+    Thread obj;
 
     obj.producer(myTask);
     obj.producer(myTask);
