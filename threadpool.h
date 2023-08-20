@@ -6,6 +6,9 @@
 #include <condition_variable>
 #include <vector>
 #include <atomic>
+#include <map>
+#include <string>
+
 
 using namespace std;
 
@@ -19,22 +22,21 @@ enum class PoolMode {
     MODE_CACHED, // 线程数量可动态增长
 };
 
+std::map<std::thread::id, int> threadIdMap;
+
+
 class Thread {
 public:
     using ThreadFunc = std::function<void()>;
-
-    Thread() = default;
 
     Thread(ThreadFunc func) : func_(func), threadId_(generateId_++) {}
 
     ~Thread() = default;
 
-    thread createThread(const std::function<void()> &func) {
-        return thread(func);
-    }
-
-    void start() {
+    void threadRun(int i ) {
         std::thread t(func_);
+        threadIdMap[t.get_id()] = i;
+
         t.detach();
     }
 
@@ -66,39 +68,54 @@ public:
         , isPoolRunning_(false)
     {}
 
-
     ThreadPool(const ThreadPool &) = delete;
     ThreadPool &operator=(const ThreadPool &) = delete;
 
-    ThreadPool(Thread *factory = new Thread()) : factory_(factory) {}
 
-//    ~ ThreadPool() {
-//        isPoolRunning_ = false;
-//        notEmpty_.notify_one();
-//        for (auto &t: threadContainer_) {
-//            t.join();
-//        }
-//        delete factory_;
-//    }
-//
-
-    void producer(function<void()> func) {
-        std::unique_lock<std::mutex> lock(taskQueMutex);
+    ~ ThreadPool() {
+        isPoolRunning_ = false;
+        notEmpty_.notify_all();
+    }
 
 
-        if (threadContainer_.size() < coreThreadSize_) {
-            threadContainer_.push_back(factory_->createThread(std::bind(&ThreadPool::consumer, this)));
-            std::cout << "thread create" << std::endl;
+    void start()
+    {
+        isPoolRunning_ = true;
+        curThreadSize_ = coreThreadSize_;
+
+        //创建核心线程数
+        for(int i = 0; i < coreThreadSize_; i++)
+        {
+            //Thread 绑定 consumer
+            auto ptr = std::make_unique<Thread>(std::bind(&ThreadPool::consumer, this));
+
+//            std::cout << i << "core threads create" << std::endl;
+
+            int threadId = ptr->getId();
+            threadsContainer_.emplace(threadId, std::move(ptr));
         }
 
+        for(int i = 0; i < coreThreadSize_; i++)
+        {
+            //执行 consumer,开启核心线程让其等待任务的到来
+            threadsContainer_[i]->threadRun(i);
+            // 执行完任务会返回这里, 记录空闲的线程
+            idleThreadSize_++;
+        }
+    }
 
+
+
+    void producer(function<void()> func) {
+        std::unique_lock<std::mutex> lock(taskQueMtx);
         //任务队列满了
         if (taskQue_.size() > taskQueMaxSize_) {
             cout << "task queue is full" << endl;
             return;
         }
+
         taskQue_.push(func);
-        std::cout << "producer add task" << std::endl;
+        std::cout << "---------producer add task------------" << std::endl;
         notEmpty_.notify_all();
     }
 
@@ -107,17 +124,24 @@ private:
         while (true) {
             std::function<void()> task;
             {
-                std::unique_lock<std::mutex> lock(taskQueMutex);
+                //先获取锁
+                std::unique_lock<std::mutex> lock(taskQueMtx);
+                std::cout  << "thread" << threadIdMap[this_thread::get_id()] << ": "<< " try get task..." << std::endl;
+
                 notEmpty_.wait(lock, [this] { return !taskQue_.empty() || isPoolRunning_ == false; });
                 if (isPoolRunning_ && taskQue_.empty())
+                {
+                    std:cout<< "thread"<< threadIdMap[this_thread::get_id()] << ": exit "<<std::endl;
                     break;
+                }
 
                 task = taskQue_.front();
                 taskQue_.pop();
+                taskSize_--;
             }
             if (task) {
-                std::cout << "consumer consume task" << endl;
-                task();
+                std::cout << "------------consumer consume task-------------" << endl;
+                task(); // 执行function<void()>
 
             }
 
@@ -149,21 +173,17 @@ private:
     std::atomic_int curThreadSize_;
     std::atomic_int idleThreadSize_;
 
-
     queue<function<void()>> taskQue_;
     std::atomic_int taskSize_;
     int taskQueMaxSize_;
 
     thread consumerThread;
 
-
     Thread *factory_;
     int consumeCount_ = 0;
 
-    mutex taskQueMutex;
+    mutex taskQueMtx;
     condition_variable notEmpty_;
-
-
 
     PoolMode poolMode_;
     std::atomic_bool isPoolRunning_;

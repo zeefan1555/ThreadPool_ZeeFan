@@ -2,7 +2,7 @@
 
 
 void myTask() {
-    std::cout << "task running" << std::endl;
+    std::cout << "-------------task running---------------" << std::endl;
     std::cout << std::endl;
 }
 
@@ -11,7 +11,9 @@ int main() {
     ThreadPool obj;
 
 
-    for (int i = 0; i < 20; i++) {
+    obj.start();
+
+    for (int i = 0; i < 1; i++) {
         obj.producer(myTask);
     }
 
