@@ -82,7 +82,7 @@ public:
 
     }
     ThreadPool(const ThreadPool&) = delete;
-    ThreadPool& opreator=(const ThreadPool&) = delete;
+    ThreadPool& operator=(const ThreadPool&) = delete;
 
     bool checkRunningState() const
     {
@@ -120,7 +120,7 @@ auto submitTask(Func&& func, Args&&... args)->std::future<decltype(func(args...)
         using RType = decltype(func(args...));
         auto task = std::make_shared<std::packaged_task<RType>>(
                 std::bind(std::forward<Func>(func), std::forward<Args>(args)...));
-        std::functure<RType> result = task->get_future();
+        std::future<RType> result = task->get_future();
 
 
         //获取锁
@@ -128,17 +128,17 @@ auto submitTask(Func&& func, Args&&... args)->std::future<decltype(func(args...)
 
         //任务提交失败
         if(!notFull_.wait_for(lock, std::chrono::seconds(1),
-          [&]()->bool {return taskQue_.size() < (size_t)(taskQueMaxThreshHold_);}))
+          [&]()->bool {return taskQue_.size() < (size_t)taskQueMaxThreshHold_;}))
         {
 			std::cerr<<"task queue is full, submit task fail" << std::endl;
             auto task = std::make_shared<std::packaged_task<RType()>>(
                     []()->RType{return RType();});
             (*task)();
-            return task->get_futrue();
+            return task->get_future();
         }
 
         //队列有空闲, 放任务到队列当中
-        taskQue.emplace([task](){(*task();})
+        taskQue_.emplace([task]() {(*task)();});
         taskSize_++;
 
     	//放了新任务, 所以任务队列不空, 通知线程来执行
@@ -162,8 +162,6 @@ auto submitTask(Func&& func, Args&&... args)->std::future<decltype(func(args...)
         }
         return result;
 
-
-
 }
 
 
@@ -177,7 +175,7 @@ void start(int initThreadSize = std::thread::hardware_concurrency())
     for(int i = 0; i < initThreadSize_; ++i){
         // 创建thread线程对象的时候，把线程函数给到thread线程对象
         auto ptr = std::make_unique<Thread>(std::bind(&ThreadPool::threadFunc, this, std::placeholders::_1));
-        int thread = ptr->getId();
+        int threadId  = ptr->getId();
         threads_.emplace(threadId, std::move(ptr));
     }
     for(int i = 0; i < initThreadSize_; i++)
@@ -188,9 +186,86 @@ void start(int initThreadSize = std::thread::hardware_concurrency())
 }
 
 private:
+    //线程函数
     void threadFunc(int threadid)
     {
         auto lastTime = std::chrono::high_resolution_clock().now();
+
+        // 所有任务必须执行完成，线程池才可以回收所有线程资源
+        for(;;)
+        {
+            Task task;
+            {
+                std::unique_lock<std::mutex> lock(taskQueMtx_);
+                std::cout<<"tid:" << std::this_thread::get_id() << ": try get task..." << std::endl;
+
+                // cached模式下创建了非核心线程，但是空闲时间超过60s，回收掉
+                // 当前时间 - 上一次线程执行的时间 > 60s
+
+
+                // 每一秒中返回一次   怎么区分：超时返回？还是有任务待执行返回
+                // 锁 + 双重判断
+                while(taskQue_.size() == 0)
+                {
+                    // 线程池要结束，回收线程资源
+                    if(!isPoolRunning_)
+                    {
+                        threads_.erase(threadid);
+                        std::cout<<"threadid: " << std::this_thread::get_id() << "exit!"<< std::endl;
+                        exitCond_.notify_all();
+                        return; // 线程函数结束, 线程结束
+                    }
+
+                    if(poolMode_ == PoolMode::MODE_CACHED)
+                    {
+                        if(std::cv_status::timeout == notEmpty_.wait_for(lock, std::chrono::seconds(1)))
+                        {
+                            auto now = std::chrono::high_resolution_clock().now();
+                            auto dur = std::chrono::duration_cast<std::chrono::seconds>(now - lastTime);
+                            //回收非核心线程
+                            if(dur.count() >= THREAD_MAX_IDLE_TIME && curThreadSize_ > initThreadSize_)
+                            {
+                                threads_.erase(threadid);
+                                curThreadSize_--;
+                                idleThreadSize_--;
+
+                                std::cout<<"threadid"<< std::this_thread::get_id() << "exit!" << std::endl;
+                                return ;
+                            }
+                        }
+                    }
+                    else
+                    {
+                        notEmpty_.wait(lock);
+                    }
+                }
+                //获取任务成功
+                idleThreadSize_--;
+                std::cout<< "tid : " << std::this_thread::get_id() << ": get task success.." << std::endl;
+
+                task = taskQue_.front();
+                taskQue_.pop();
+                taskSize_--;
+
+                // 如果依然有剩余任务，继续通知其它得线程执行任务
+                if(taskQue_.size() > 0)
+                {
+                   notEmpty_.notify_all();
+                }
+
+                // 取出一个任务，进行通知，通知可以继续提交生产任务
+                notFull_.notify_all();
+            }
+
+            if(task != nullptr)
+            {
+                task();//
+            }
+
+            //线程执行任务执行完了
+            idleThreadSize_++;
+            lastTime = std::chrono::high_resolution_clock().now(); // 更新线程执行完任务的时间
+        }
 
     }
 
@@ -218,7 +293,7 @@ private:
     condition_variable notEmpty_;
     condition_variable exitCond_;
 
-    poolMode poolMode_;
+    PoolMode poolMode_;
     atomic_bool isPoolRunning_;
 
 
