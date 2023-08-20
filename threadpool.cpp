@@ -96,14 +96,11 @@ int main()
 {
     Thread obj;
 
-    obj.producer(myTask);
-    obj.producer(myTask);
-    obj.producer(myTask);
-    obj.producer(myTask);
-    obj.producer(myTask);
-    obj.producer(myTask);
-    obj.producer(myTask);
-    obj.producer(myTask);
+    for(int i = 0; i < 8; i++)
+    {
+        obj.producer(myTask);
+    }
+
 
 
     std::this_thread::sleep_for(std::chrono::seconds(1));
