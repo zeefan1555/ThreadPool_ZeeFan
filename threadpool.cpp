@@ -17,7 +17,7 @@ public:
    } 
    ~ ZeefanExecutorV2()
    {
-        isPoolRunning_ = true;
+        isPoolRunning_ = false;
         condition.notify_one();
         consumerThread.join();
    }
