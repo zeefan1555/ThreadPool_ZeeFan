@@ -61,16 +61,16 @@ int Thread::generateId_ = 0;
 class ThreadPool {
 public:
     ThreadPool()
-        : coreThreadSize_(8)
+            : coreThreadSize_(8)
 
 //      : coreThreadSize_(std::thread::hardware_concurrency())
-        , taskSize_(0)
-        , idleThreadSize_(0)
-        , curThreadSize_(0)
-        , taskQueMaxSize_(TASK_MAX)
-        , threadMaxSize_(THREAD_MAX)
-        , poolMode_(PoolMode::MODE_FIXED)
-        , isPoolRunning_(false)
+            , taskSize_(0)
+            , idleThreadSize_(0)
+            , curThreadSize_(0)
+            , taskQueMaxSize_(TASK_MAX)
+            , threadMaxSize_(THREAD_MAX)
+            , poolMode_(PoolMode::MODE_FIXED)
+            , isPoolRunning_(false)
     {}
 
     ThreadPool(const ThreadPool &) = delete;
@@ -81,8 +81,8 @@ public:
 
         isPoolRunning_ = false;
         // 唤醒等待的线程
-        notEmpty_.notify_all();
 
+        notEmpty_.notify_all();
         std::unique_lock<std::mutex> lock(taskQueMtx_);
         // 等待所有的线程退出: 1.正在运行的, 2. 阻塞着的
         exitCond_.wait(lock, [&]()->bool{return threadsContainer_.size() == 0;});
@@ -115,7 +115,6 @@ public:
 
     template<typename Func, typename... Args>
     auto producer(Func&& func , Args&&... args) -> std::future<decltype(func(args...))>
-
     {
         using RType = decltype(func(args...));
         auto task = std::make_shared<std::packaged_task<RType()>>
@@ -152,6 +151,9 @@ private:
 
                 while(taskQue_.size() == 0)
                 {
+
+                    std::cout<< "thread"<< threadIdMap[this_thread::get_id()] << ": wait "<<std::endl;
+                    notEmpty_.wait(lock);
                     if(!isPoolRunning_)
                     {
                         //释放线程
@@ -160,12 +162,11 @@ private:
                         exitCond_.notify_all();
                         return;
                     }
-                    std::cout<< "thread"<< threadIdMap[this_thread::get_id()] << ": wait "<<std::endl;
-                    notEmpty_.wait(lock);
+
+
                 }
 
                 //消费任务
-
                 task = taskQue_.front();
                 taskQue_.pop();
 
@@ -175,16 +176,14 @@ private:
                     notEmpty_.notify_all();
                 }
 
-
-
             }
             if (task) {
                 std::cout<< "thread"<< threadIdMap[this_thread::get_id()] << ": exec task  "<<std::endl;
                 task(); // 执行function<void()>
-
             }
-
         }
+
+
     }
 
 
