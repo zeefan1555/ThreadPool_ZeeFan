@@ -2,21 +2,22 @@
 
 
 void myTask() {
-    std::cout << "-------------task running---------------" << std::endl;
+//    std::cout << "------------thread"<<threadIdMap[ std:: this_thread::get_id()] << ": run task ---------------" << std::endl;
     std::cout << std::endl;
 }
 
 
 int main() {
-    ThreadPool obj;
+    {
+        ThreadPool obj;
+        obj.start();
 
+        for (int i = 0; i < 8; i++) {
+            obj.producer(myTask);
+        }
 
-    obj.start();
-
-    for (int i = 0; i < 1; i++) {
-        obj.producer(myTask);
     }
-
+    std::cout<<"-----------main thread eixt-------------"<<std::endl;
 
     std::this_thread::sleep_for(std::chrono::seconds(3));
 

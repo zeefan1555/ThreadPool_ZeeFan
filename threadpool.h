@@ -1,3 +1,5 @@
+#ifndef THREADPOOL_H
+#define THREADPOOL_H
 #include <iostream>
 #include <thread>
 #include <functional>
@@ -27,14 +29,14 @@ std::map<std::thread::id, int> threadIdMap;
 
 class Thread {
 public:
-    using ThreadFunc = std::function<void()>;
+    using ThreadFunc = std::function<void(int)>;
 
     Thread(ThreadFunc func) : func_(func), threadId_(generateId_++) {}
 
     ~Thread() = default;
 
     void threadRun(int i ) {
-        std::thread t(func_);
+        std::thread t(func_, threadId_);
         threadIdMap[t.get_id()] = i;
 
         t.detach();
@@ -58,7 +60,9 @@ int Thread::generateId_ = 0;
 class ThreadPool {
 public:
     ThreadPool()
-        : coreThreadSize_(std::thread::hardware_concurrency())
+        : coreThreadSize_(2)
+
+//      : coreThreadSize_(std::thread::hardware_concurrency())
         , taskSize_(0)
         , idleThreadSize_(0)
         , curThreadSize_(0)
@@ -73,8 +77,12 @@ public:
 
 
     ~ ThreadPool() {
+
         isPoolRunning_ = false;
+
         notEmpty_.notify_all();
+        std::unique_lock<std::mutex> lock(taskQueMtx_);
+        exitCond_.wait(lock, [&]()->bool{return threadsContainer_.size() == 0;});
     }
 
 
@@ -87,7 +95,7 @@ public:
         for(int i = 0; i < coreThreadSize_; i++)
         {
             //Thread 绑定 consumer
-            auto ptr = std::make_unique<Thread>(std::bind(&ThreadPool::consumer, this));
+            auto ptr = std::make_unique<Thread>(std::bind(&ThreadPool::consumer, this,  std::placeholders::_1));
 
 //            std::cout << i << "core threads create" << std::endl;
 
@@ -107,7 +115,7 @@ public:
 
 
     void producer(function<void()> func) {
-        std::unique_lock<std::mutex> lock(taskQueMtx);
+        std::unique_lock<std::mutex> lock(taskQueMtx_);
         //任务队列满了
         if (taskQue_.size() > taskQueMaxSize_) {
             cout << "task queue is full" << endl;
@@ -120,27 +128,48 @@ public:
     }
 
 private:
-    void consumer() {
+    void consumer(int threadId) {
         while (true) {
             std::function<void()> task;
             {
                 //先获取锁
-                std::unique_lock<std::mutex> lock(taskQueMtx);
-                std::cout  << "thread" << threadIdMap[this_thread::get_id()] << ": "<< " try get task..." << std::endl;
+                std::unique_lock<std::mutex> lock(taskQueMtx_);
+                std::cout  << "thread" << threadIdMap[this_thread::get_id()] << ": "<< "  get mutex..." << std::endl;
 
-                notEmpty_.wait(lock, [this] { return !taskQue_.empty() || isPoolRunning_ == false; });
-                if (isPoolRunning_ && taskQue_.empty())
+                while(taskQue_.size() == 0)
                 {
-                    std:cout<< "thread"<< threadIdMap[this_thread::get_id()] << ": exit "<<std::endl;
-                    break;
+                    if(!isPoolRunning_)
+                    {
+                        threadsContainer_.erase(threadId);
+                        std::cout<< "thread"<< threadIdMap[this_thread::get_id()] << ": exit "<<std::endl;
+                        exitCond_.notify_all();
+                        return;
+                    }
+                    std::cout<< "thread"<< threadIdMap[this_thread::get_id()] << ": wait "<<std::endl;
+                    notEmpty_.wait(lock);
                 }
+
+//                notEmpty_.wait(lock, [this] { return !taskQue_.empty() || isPoolRunning_ == false; });
+//                if (isPoolRunning_ && taskQue_.empty())
+//                {
+//                    std::cout<< "thread"<< threadIdMap[this_thread::get_id()] << ": exit "<<std::endl;
+//                    break;
+//               }
 
                 task = taskQue_.front();
                 taskQue_.pop();
-                taskSize_--;
+
+                //如果还有任务继续通知
+                if(taskQue_.size() > 0)
+                {
+                    notEmpty_.notify_all();
+                }
+
+
+
             }
             if (task) {
-                std::cout << "------------consumer consume task-------------" << endl;
+                std::cout<< "thread"<< threadIdMap[this_thread::get_id()] << ": exec task  "<<std::endl;
                 task(); // 执行function<void()>
 
             }
@@ -182,11 +211,13 @@ private:
     Thread *factory_;
     int consumeCount_ = 0;
 
-    mutex taskQueMtx;
+    mutex taskQueMtx_;
     condition_variable notEmpty_;
+    std::condition_variable exitCond_;
 
     PoolMode poolMode_;
     std::atomic_bool isPoolRunning_;
 
 };
+#endif
 
