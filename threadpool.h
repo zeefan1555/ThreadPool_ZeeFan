@@ -10,6 +10,7 @@
 #include <atomic>
 #include <map>
 #include <string>
+#include <future>
 
 
 using namespace std;
@@ -25,7 +26,7 @@ enum class PoolMode {
 };
 
 std::map<std::thread::id, int> threadIdMap;
-
+//using threadId = threadIdMap[this_thread::get_id()];
 
 class Thread {
 public:
@@ -60,7 +61,7 @@ int Thread::generateId_ = 0;
 class ThreadPool {
 public:
     ThreadPool()
-        : coreThreadSize_(2)
+        : coreThreadSize_(8)
 
 //      : coreThreadSize_(std::thread::hardware_concurrency())
         , taskSize_(0)
@@ -113,18 +114,34 @@ public:
     }
 
 
+    template<typename Func, typename... Args>
+    auto producer(Func&& func , Args&&... args) -> std::future<decltype(func(args...))>
 
-    void producer(function<void()> func) {
+    {
+        using RType = decltype(func(args...));
+        auto task = std::make_shared<std::packaged_task<RType()>>
+                (std::bind(std::forward<Func>(func), std::forward<Args>(args)...));
+        std::future<RType> res = task->get_future();
+
         std::unique_lock<std::mutex> lock(taskQueMtx_);
         //任务队列满了
         if (taskQue_.size() > taskQueMaxSize_) {
             cout << "task queue is full" << endl;
-            return;
+            auto task = std::make_shared<std::packaged_task<RType()>>(
+                    []()->RType { return RType(); });
+            (*task)();
+            return task->get_future();
+
         }
 
-        taskQue_.push(func);
+//        taskQue_.push(func);
+        taskQue_.emplace([task](){
+            (*task)();
+        });
+
         std::cout << "---------producer add task------------" << std::endl;
         notEmpty_.notify_all();
+        return res ;
     }
 
 private:
@@ -140,6 +157,7 @@ private:
                 {
                     if(!isPoolRunning_)
                     {
+                        //释放线程
                         threadsContainer_.erase(threadId);
                         std::cout<< "thread"<< threadIdMap[this_thread::get_id()] << ": exit "<<std::endl;
                         exitCond_.notify_all();
