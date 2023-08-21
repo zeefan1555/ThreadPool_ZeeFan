@@ -26,9 +26,6 @@ int main() {
         auto  res1 = pool.producer(sum1, 1, 2);
         std::cout << res1.get() << std::endl;
 
-
-
-
     }
     std::cout<<"-----------main thread eixt-------------"<<std::endl;
 

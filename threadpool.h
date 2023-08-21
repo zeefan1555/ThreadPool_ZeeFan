@@ -80,9 +80,11 @@ public:
     ~ ThreadPool() {
 
         isPoolRunning_ = false;
-
+        // 唤醒等待的线程
         notEmpty_.notify_all();
+
         std::unique_lock<std::mutex> lock(taskQueMtx_);
+        // 等待所有的线程退出: 1.正在运行的, 2. 阻塞着的
         exitCond_.wait(lock, [&]()->bool{return threadsContainer_.size() == 0;});
     }
 
@@ -97,9 +99,6 @@ public:
         {
             //Thread 绑定 consumer
             auto ptr = std::make_unique<Thread>(std::bind(&ThreadPool::consumer, this,  std::placeholders::_1));
-
-//            std::cout << i << "core threads create" << std::endl;
-
             int threadId = ptr->getId();
             threadsContainer_.emplace(threadId, std::move(ptr));
         }
@@ -133,8 +132,6 @@ public:
             return task->get_future();
 
         }
-
-//        taskQue_.push(func);
         taskQue_.emplace([task](){
             (*task)();
         });
@@ -167,12 +164,7 @@ private:
                     notEmpty_.wait(lock);
                 }
 
-//                notEmpty_.wait(lock, [this] { return !taskQue_.empty() || isPoolRunning_ == false; });
-//                if (isPoolRunning_ && taskQue_.empty())
-//                {
-//                    std::cout<< "thread"<< threadIdMap[this_thread::get_id()] << ": exit "<<std::endl;
-//                    break;
-//               }
+                //消费任务
 
                 task = taskQue_.front();
                 taskQue_.pop();
@@ -231,7 +223,7 @@ private:
 
     mutex taskQueMtx_;
     condition_variable notEmpty_;
-    std::condition_variable exitCond_;
+    std::condition_variable exitCond_; // 等待线程资源全部回收
 
     PoolMode poolMode_;
     std::atomic_bool isPoolRunning_;
