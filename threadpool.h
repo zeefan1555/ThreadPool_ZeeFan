@@ -82,8 +82,8 @@ public:
         isPoolRunning_ = false;
         // 唤醒等待的线程
 
-        notEmpty_.notify_all();
         std::unique_lock<std::mutex> lock(taskQueMtx_);
+        notEmpty_.notify_all();
         // 等待所有的线程退出: 1.正在运行的, 2. 阻塞着的
         exitCond_.wait(lock, [&]()->bool{return threadsContainer_.size() == 0;});
     }
@@ -152,8 +152,6 @@ private:
                 while(taskQue_.size() == 0)
                 {
 
-                    std::cout<< "thread"<< threadIdMap[this_thread::get_id()] << ": wait "<<std::endl;
-                    notEmpty_.wait(lock);
                     if(!isPoolRunning_)
                     {
                         //释放线程
@@ -162,6 +160,9 @@ private:
                         exitCond_.notify_all();
                         return;
                     }
+                    std::cout<< "thread"<< threadIdMap[this_thread::get_id()] << ": wait "<<std::endl;
+                    notEmpty_.wait(lock);
+
 
 
                 }
