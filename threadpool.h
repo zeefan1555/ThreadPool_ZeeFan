@@ -89,9 +89,10 @@ public:
     }
 
 
-    void start()
+    void start(int coreThreadSize)
     {
         isPoolRunning_ = true;
+        coreThreadSize_ = coreThreadSize;
         curThreadSize_ = coreThreadSize_;
 
         //创建核心线程数
@@ -135,13 +136,34 @@ public:
             (*task)();
         });
 
-        std::cout << "---------producer add task------------" << std::endl;
+        std::cout << "---------create core  thread------------" << std::endl;
         notEmpty_.notify_all();
+
+        if(poolMode_ == PoolMode::MODE_CACHED && taskQue_.size() > idleThreadSize_ && curThreadSize_ < threadMaxSize_)
+        {
+            std::cout << "-------create uncore thread--------"<<std::endl;
+
+            // 创建新的线程对象
+            auto ptr = std::make_unique<Thread>(std::bind(&ThreadPool::consumer, this, std::placeholders::_1));
+            int threadId = ptr->getId();
+            threadsContainer_.emplace(threadId, std::move(ptr));
+            // 启动线程
+            threadsContainer_[threadId]->threadRun(threadId);
+            // 修改线程个数相关的变量
+            curThreadSize_++;
+            idleThreadSize_++;
+
+        }
+
+
+
         return res ;
     }
 
 private:
-    void consumer(int threadId) {
+    void consumer(int threadId)
+    {
+        auto lastTime = std::chrono::high_resolution_clock().now();
         while (true) {
             std::function<void()> task;
             {
@@ -161,12 +183,27 @@ private:
                         return;
                     }
                     std::cout<< "thread"<< threadIdMap[this_thread::get_id()] << ": wait "<<std::endl;
-                    notEmpty_.wait(lock);
-
-
+                    if (poolMode_ == PoolMode::MODE_CACHED)
+                    {
+                        if(std::cv_status::timeout == notEmpty_.wait_for(lock, std::chrono::seconds(1)))
+                        {
+                            auto now = std::chrono::high_resolution_clock().now();
+                            auto dur = std::chrono::duration_cast<std::chrono::seconds>(now - lastTime);
+                            if(dur.count() >= THREAD_IDLE_TIME && curThreadSize_ > coreThreadSize_)
+                            {
+                                threadsContainer_.erase(threadId); // std::this_thread::getid()
+                                curThreadSize_--;
+                                idleThreadSize_--;
+                                std::cout<< "thread"<< threadIdMap[this_thread::get_id()] << ": exit "<<std::endl;
+                                return;
+                            }
+                        }
+                    }
+                    else{
+                        notEmpty_.wait(lock);
+                    }
 
                 }
-
                 //消费任务
                 task = taskQue_.front();
                 taskQue_.pop();
@@ -178,10 +215,13 @@ private:
                 }
 
             }
-            if (task) {
+            if (task)
+            {
                 std::cout<< "thread"<< threadIdMap[this_thread::get_id()] << ": exec task  "<<std::endl;
                 task(); // 执行function<void()>
             }
+            idleThreadSize_++;
+            lastTime = std::chrono::high_resolution_clock().now(); // 更新线程执行完任务的时间
         }
 
 
@@ -195,6 +235,7 @@ private:
         return isPoolRunning_;
     }
 
+public:
     // 设置线程池的工作模式
     void setMode(PoolMode mode) {
         if (checkRunningState())
