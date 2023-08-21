@@ -164,12 +164,10 @@ public:
 private:
     void consumer(int threadId)
     {
-
         auto lastTime = std::chrono::high_resolution_clock().now();
         while (true) {
             std::function<void()> task;
             {
-
                 //先获取锁
                 std::unique_lock<std::mutex> lock(taskQueMtx_);
                 std::cout  << "thread" << threadIdMap[this_thread::get_id()] << ": "<< "  get mutex..." << std::endl;
@@ -200,10 +198,8 @@ private:
                                 return;
                             }
                         }
-
                     }
-                    else
-                    {
+                    else{
                         notEmpty_.wait(lock);
                     }
                 }
